@@ -8,6 +8,38 @@ const RPCS = {
     polygon: "https://polygon-mainnet.infura.io/v3/0883fc4e792c4b78aa435b2332790b73"
 };
 const SAFE_SEND_URL = 'http://localhost:3001/check'; // <-- replace or run stub
+// ---- SafeSend Integration ----
+async function runSafeSendCheck(provider, to) {
+  const chainMap = {
+    1: 'mainnet',
+    11155111: 'sepolia',
+    137: 'polygon'
+  };
+
+  const { chainId } = await provider.getNetwork();
+  const chain = chainMap[Number(chainId)] || 'sepolia';
+
+  const u = new URL(SAFE_SEND_URL);
+  u.searchParams.set('address', to);
+  u.searchParams.set('chain', chain);
+
+  const r = await fetch(u.toString());
+  if (!r.ok) throw new Error(`SafeSend ${r.status}`);
+  return r.json(); // -> { score, findings, ... }
+}
+
+// Simple UI helper to display SafeSend results
+function renderSafeSendPanel(check) {
+  const panel = document.querySelector('#safesend-status');
+  if (!panel) return;
+  panel.innerHTML = `
+    <div style="padding:8px;border-radius:8px;background:${
+      check.score >= 70 ? '#f87171' : check.score >= 40 ? '#facc15' : '#4ade80'
+    };color:black;">
+      <strong>SafeSend Score:</strong> ${check.score}<br/>
+      <strong>Findings:</strong> ${check.findings.join('; ')}
+    </div>`;
+}
 
 // helpers
 const $ = (q) => document.querySelector(q);
