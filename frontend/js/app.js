@@ -1,4 +1,4 @@
-import { ethers } = window;
++ const { ethers } = window;;
 const XMTP = window.XMTP;
 
 // ---- CONFIG (EDIT) ----
