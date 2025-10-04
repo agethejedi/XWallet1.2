@@ -7,7 +7,7 @@ const RPCS = {
    mainnet: "https://mainnet.infura.io/v3/0883fc4e792c4b78aa435b2332790b73",
     polygon: "https://polygon-mainnet.infura.io/v3/0883fc4e792c4b78aa435b2332790b73"
 };
-const SAFE_SEND_URL = 'https://your-safesend.onrender.com/check'; // <-- replace or run stub
+const SAFE_SEND_URL = 'http://localhost:3001/check'; // <-- replace or run stub
 
 // helpers
 const $ = (q) => document.querySelector(q);
