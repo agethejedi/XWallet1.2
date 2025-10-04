@@ -1,5 +1,7 @@
-import { ethers } from window;
+// use the globals set in index.html
+const { ethers } = window;
 const XMTP = window.XMTP;
+
 
 // ---- CONFIG (EDIT) ----
 const RPCS = {
