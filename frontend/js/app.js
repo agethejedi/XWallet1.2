@@ -8,6 +8,7 @@ const RPCS = {
     polygon: "https://polygon-mainnet.infura.io/v3/0883fc4e792c4b78aa435b2332790b73"
 };
 const SAFE_SEND_URL = 'https://your-safesend.onrender.com/check'; // <-- replace or run stub
+const { RPCS, SAFE_SEND_URL } = window.XWALLET_CONFIG;
 
 // helpers
 const $ = (q) => document.querySelector(q);
