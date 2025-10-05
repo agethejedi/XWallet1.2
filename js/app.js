@@ -262,34 +262,25 @@ async function loadRecentTxs(){
   }catch(e){ console.warn(e); }
 }
 
-// markets
 async function fetchMarket(id){
   try{
-    const r = await fetch(`https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=1&interval=minute`);
+    // derive backend base (works for localhost & production)
+    const backendBase = SAFE_SEND_URL.replace(/\/check$/, "");
+    const u = new URL(backendBase + "/market/chart");
+    u.searchParams.set("id", id);
+    u.searchParams.set("days", "1");
+    u.searchParams.set("interval", "minute");
+
+    const r = await fetch(u.toString());
+    if (!r.ok) throw new Error("backend market error");
     const j = await r.json();
-    return (j.prices||[]).slice(-120).map(([t,v])=>({t, v}));
-  }catch(e){
-    console.warn('Market fetch failed', id, e);
-    return Array.from({length:60},(_,i)=>({t:Date.now()- (60-i)*60000, v: 100 + (Math.random()-0.5)*i}));
+    return (j.prices || []).slice(-120).map(([t, v]) => ({ t, v }));
+  } catch (e) {
+    console.warn("Market fetch failed (via backend)", id, e);
+    // graceful fallback sparkline
+    return Array.from({ length: 60 }, (_, i) => ({
+      t: Date.now() - (60 - i) * 60000,
+      v: 100 + (Math.random() - 0.5) * i
+    }));
   }
-}
-async function renderMarkets(){
-  const assets = [
-    {id:'bitcoin', el:'mk_btc'},
-    {id:'ethereum', el:'mk_eth'},
-    {id:'solana', el:'mk_sol'},
-    {id:'matic-network', el:'mk_matic'},
-    {id:'usd-coin', el:'mk_usdc'}
-  ];
-  for (const a of assets){
-    const data = await fetchMarket(a.id);
-    const el = document.getElementById(a.el); if (!el) continue;
-    const ctx = el.getContext('2d');
-    new Chart(ctx, {
-      type:'line',
-      data:{ labels: data.map(p=>new Date(p.t).toLocaleTimeString()), datasets:[{ data: data.map(p=>p.v), tension:.25, pointRadius:0 }]},
-      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{enabled:true}}, scales:{x:{display:false}, y:{display:false}} }
-    });
-  }
-  setTimeout(renderMarkets, 60000);
 }
