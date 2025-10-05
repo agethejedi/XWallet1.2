@@ -248,18 +248,7 @@ $('#ctaApp')?.addEventListener('click', ()=> window.scrollTo({ top: document.bod
 $('#ctaLearn')?.addEventListener('click', ()=> window.scrollTo({ top: window.innerHeight, behavior: 'smooth' }));
 
 // SafeSend backend call
-async function fetchSafeSend(address){
-  try{
-    const u = new URL(SAFE_SEND_URL);
-    u.searchParams.set('address', address);
-    const r = await fetch(u.toString());
-    if (!r.ok) throw new Error('SafeSend backend error');
-    return await r.json();
-  }catch(e){
-    console.warn('SafeSend fetch failed', e);
-    return { score: 50, findings: ['safeSend backend unreachable — default medium'] };
-  }
-}
+
 
 // Provider + send
 async function getProvider(chain='sep'){ if (!RPCS[chain]) throw new Error('RPC not configured for ' + chain); return new ethers.JsonRpcProvider(RPCS[chain]); }
