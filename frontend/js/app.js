@@ -3,7 +3,7 @@ const XMTP = window.XMTP;
 
 // ---- CONFIG (EDIT) ----
 const RPCS = {
-  sep: "https://eth-sepolia.g.alchemy.com/v2/kxHg5y9yBXWAb9cOcJsf0", // <-- replace
+  sep: 'https://eth-sepolia.g.alchemy.com/v2/kxHg5y9yBXWAb9cOcJsf0', // <-- replace
    mainnet: "https://mainnet.infura.io/v3/0883fc4e792c4b78aa435b2332790b73",
     polygon: "https://polygon-mainnet.infura.io/v3/0883fc4e792c4b78aa435b2332790b73"
 };
