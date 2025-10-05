@@ -5,7 +5,7 @@ const XMTP = window.XMTP;
 
 // ---- CONFIG (EDIT) ----
 const RPCS = {
-  sep: 'https://eth-sepolia.g.alchemy.com/v2/REPLACE_WITH_YOUR_ALCHEMY_KEY' // <-- replace
+  sep: 'https://eth-sepolia.g.alchemy.com/v2/kxHg5y9yBXWAb9cOcJsf0' // <-- replace
 };
 const SAFE_SEND_URL = 'http://localhost:3001/check'; // <-- replace or run stub
 
