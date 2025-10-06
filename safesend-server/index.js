@@ -84,64 +84,6 @@ app.get("/check", async (req, res) => {
   }
 });
 
-// ===== CoinGecko proxy (60s cache
-
-const CG_CACHE = new Map();
-function cgCacheGet(key) {
-  const hit = CG_CACHE.get(key);
-  if (!hit) return null;
-  if (Date.now() - hit.ts > 60_000) return null; // 60s TTL
-  return hit.data;
-}
-function cgCacheSet(key, data) {
-  CG_CACHE.set(key, { ts: Date.now(), data });
-}
-
-// GET /market/chart?id=ethereum&days=1&interval=minute
-app.get("/market/chart", async (req, res) => {
-  try {
-    const id = (req.query.id || "ethereum").toString();
-    const days = (req.query.days || "1").toString();
-    const interval = (req.query.interval || "minute").toString();
-
-    const cacheKey = `${id}|${days}|${interval}`;
-    const cached = cgCacheGet(cacheKey);
-    if (cached) return res.json(cached);
-
-    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
-      id
-    )}/market_chart?vs_currency=usd&days=${encodeURIComponent(
-      days
-    )}&interval=${encodeURIComponent(interval)}`;
-
-    const headers = {};
-    if (process.env.COINGECKO_API_KEY) {
-      headers["x-cg-pro-api-key"] = process.env.COINGECKO_API_KEY;
-    }
-
-    const r = await fetch(url, { headers });
-    if (!r.ok) throw new Error(`CoinGecko ${r.status}`);
-    const data = await r.json();
-
-    cgCacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    console.error("CoinGecko proxy error:", e);
-    res.status(500).json({ error: "coingecko_failed", message: String(e.message || e) });
-  }
-});
-
-// (optional) quick health to confirm the route is registered
-app.get("/health", (req, res) => {
-  const hasCG = !!app._router.stack.find(l => l.route?.path === "/market/chart");
-  res.json({
-    ok: true,
-    build: "safesend-etherscan-v1.1",
-    hasKey: !!process.env.ETHERSCAN_API_KEY,
-    hasCG
-  });
-});
-
 // ===== CoinGecko proxy (60s cache) =====
 const CG_CACHE = new Map();
 function cgCacheGet(key) {
@@ -197,4 +139,4 @@ app.get("/health", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ SafeSend running on http://localhost:${PORT}`);
-  });
+});
