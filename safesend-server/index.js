@@ -136,6 +136,13 @@ app.get("/health", (req, res) => {
     hasCG
   });
 });
+// Debug: list registered routes at startup
+console.log(
+  "Routes:",
+  app._router.stack
+    .filter(l => l.route)
+    .map(l => `${Object.keys(l.route.methods).join(',').toUpperCase()} ${l.route.path}`)
+);
 
 app.listen(PORT, () => {
   console.log(`✅ SafeSend running on http://localhost:${PORT}`);
