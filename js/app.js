@@ -308,3 +308,4 @@ async function renderMarkets(){
     });
   }
   setTimeout(renderMarkets, 60000);
+}
