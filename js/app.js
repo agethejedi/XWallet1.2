@@ -1,6 +1,6 @@
 // use the globals set in index.html
 const { ethers } = window;
-const XMTP = window.XMTP;
+const XMTP = window.XMTP || window.xmtp;
 
 
 // ---- CONFIG (EDIT) ----
