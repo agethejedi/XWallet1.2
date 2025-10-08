@@ -435,4 +435,4 @@ async function renderMarkets(){
 }
 
 // Optional: auto-prompt unlock when a vault exists
-try { if (getVault()) showLock(); } catch {}
+//try { if (getVault()) showLock(); } catch {}
