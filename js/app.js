@@ -2,74 +2,119 @@
 const { ethers } = window;
 const XMTP = window.XMTP || window.xmtp;
 
-
 // ---- CONFIG (EDIT) ----
 const RPCS = {
   sep: 'https://eth-sepolia.g.alchemy.com/v2/kxHg5y9yBXWAb9cOcJsf0',
-   // mainnet: 'https://mainnet.infura.io/v3/0883fc4e792c4b78aa435b2332790b73',
-  // polygon: 'https://polygon-mainnet.infura.io/v3/<0883fc4e792c4b78aa435b2332790b73>',
-};// <-- replace
-
-const SAFE_SEND_URL = 'http://localhost:3001/check'; // <-- replace or run stub
+  // mainnet: 'https://mainnet.infura.io/v3/XXXXXXXX',
+  // polygon: 'https://polygon-mainnet.infura.io/v3/XXXXXXXX',
+};
+const SAFE_SEND_URL = 'http://localhost:3001/check'; // point to your public backend in production
 
 // helpers
-const $ = (q) => document.querySelector(q);
+const $  = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
 
 // AES-GCM + PBKDF2 vault
 async function aesEncrypt(password, plaintext){
-  const enc = new TextEncoder();
+  const enc  = new TextEncoder();
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const km = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:100000, hash:'SHA-256'}, km, {name:'AES-GCM', length:256}, false, ['encrypt']);
-  const ct = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, enc.encode(plaintext)));
+  const iv   = crypto.getRandomValues(new Uint8Array(12));
+  const km   = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
+  const key  = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:100000, hash:'SHA-256'}, km, {name:'AES-GCM', length:256}, false, ['encrypt']);
+  const ct   = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, enc.encode(plaintext)));
   return { ct: Array.from(ct), iv: Array.from(iv), salt: Array.from(salt) };
 }
 async function aesDecrypt(password, payload){
   const dec = new TextDecoder();
   const { ct, iv, salt } = payload;
-  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt:new Uint8Array(salt), iterations:100000, hash:'SHA-256'}, km, {name:'AES-GCM', length:256}, false, ['decrypt']);
-  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:new Uint8Array(iv)}, key, new Uint8Array(ct));
+  const km   = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
+  const key  = await crypto.subtle.deriveKey({name:'PBKDF2', salt:new Uint8Array(salt), iterations:100000, hash:'SHA-256'}, km, {name:'AES-GCM', length:256}, false, ['decrypt']);
+  const pt   = await crypto.subtle.decrypt({name:'AES-GCM', iv:new Uint8Array(iv)}, key, new Uint8Array(ct));
   return dec.decode(pt);
 }
 
 // state/storage/lock
-const state = { unlocked:false, wallet:null, xmtp:null, provider:null, signer:null, inactivityTimer:null };
+const state = {
+  unlocked:false, wallet:null, xmtp:null, provider:null, signer:null,
+  inactivityTimer:null, decryptedPhrase:null
+};
 const STORAGE_KEY = 'xwallet_vault_v1.2';
 function getVault(){ const s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : null; }
 function setVault(v){ localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); }
-function lock(){ state.unlocked=false; state.wallet=null; state.xmtp=null; state.provider=null; state.signer=null; $('#lockState').textContent='Locked'; }
+
+function lock(){
+  state.unlocked=false;
+  state.wallet=null;
+  state.xmtp=null;
+  state.provider=null;
+  state.signer=null;
+  state.decryptedPhrase=null;
+  if (window._xmtpStreamCancel) { window._xmtpStreamCancel(); window._xmtpStreamCancel = null; }
+  $('#lockState').textContent='Locked';
+}
 function scheduleAutoLock(){ clearTimeout(state.inactivityTimer); state.inactivityTimer = setTimeout(()=>{ lock(); showLock(); }, 10*60*1000); }
+
+// ----- XMTP helper: ensure client is initialized after unlock -----
+async function ensureXMTP() {
+  if (state.xmtp) return state.xmtp;
+  if (!state.wallet) throw new Error('Unlock first');
+  state.xmtp = await XMTP.Client.create(state.wallet, { env: 'production' });
+  return state.xmtp;
+}
+
+// ----- Inbox helper (latest from each conversation) -----
+async function loadInbox() {
+  if (!state.xmtp) { $('#inbox')?.textContent = 'Connect wallet (Unlock) first.'; return; }
+  const convos = await state.xmtp.conversations.list();
+  const latest = [];
+  for (const c of convos.slice(0, 20)) {
+    const msgs = await c.messages({ pageSize: 1, direction: 'descending' });
+    if (msgs.length) latest.push({ peer: c.peerAddress, text: msgs[0].content, at: msgs[0].sent });
+  }
+  latest.sort((a,b)=> b.at - a.at);
+  const el = document.getElementById('inbox');
+  if (!el) return;
+  el.innerHTML =
+    latest.map(m =>
+      `<div class="kv"><div>${m.peer}</div><div>${new Date(m.at).toLocaleString()}</div></div>
+       <div class="small">${m.text}</div><hr class="sep"/>`
+    ).join('') || 'No messages yet.';
+}
 
 // views
 const VIEWS = {
-  dashboard(){ return `
-    <div class="label">Welcome</div>
-    <div class="alert">Create or import a wallet, then unlock to use Messaging, Send, and Markets. This wallet is non-custodial; your secret is encrypted locally.</div>
-    <hr class="sep"/>
-    <div class="grid-2">
-      <div>
-        <div class="label">Create wallet</div>
-        <button class="btn" id="gen">Generate 12-word phrase</button>
-        <div style="height:8px"></div>
-        <textarea id="mnemonic" rows="3" readonly></textarea>
-        <div style="height:8px"></div>
-        <input id="password" type="password" placeholder="Password to encrypt (like MetaMask)"/>
-        <div style="height:8px"></div>
-        <button class="btn primary" id="save">Save vault</button>
+  dashboard(){ 
+    const hasVault = !!getVault();
+    const banner = hasVault
+      ? `<div class="alert success">✅ Vault present on this device. <button class="btn" id="bannerUnlock">Unlock now</button></div>`
+      : `<div class="alert warn">⚠️ No vault saved yet. Create or Import a wallet, then click <b>Save vault</b> to keep access after closing the browser.</div>`;
+    return `
+      <div class="label">Welcome</div>
+      ${banner}
+      <div class="alert">Create or import a wallet, then unlock to use Messaging, Send, and Markets. This wallet is non-custodial; your secret is encrypted locally.</div>
+      <hr class="sep"/>
+      <div class="grid-2">
+        <div>
+          <div class="label">Create wallet</div>
+          <button class="btn" id="gen">Generate 12-word phrase</button>
+          <div style="height:8px"></div>
+          <textarea id="mnemonic" rows="3" readonly></textarea>
+          <div style="height:8px"></div>
+          <input id="password" type="password" placeholder="Password to encrypt (like MetaMask)"/>
+          <div style="height:8px"></div>
+          <button class="btn primary" id="save">Save vault</button>
+        </div>
+        <div>
+          <div class="label">Import wallet</div>
+          <textarea id="mnemonicIn" rows="3" placeholder="Enter your 12 or 24 words"></textarea>
+          <div style="height:8px"></div>
+          <input id="passwordIn" type="password" placeholder="Password to encrypt"/>
+          <div style="height:8px"></div>
+          <button class="btn" id="doImport">Import</button>
+        </div>
       </div>
-      <div>
-        <div class="label">Import wallet</div>
-        <textarea id="mnemonicIn" rows="3" placeholder="Enter your 12 or 24 words"></textarea>
-        <div style="height:8px"></div>
-        <input id="passwordIn" type="password" placeholder="Password to encrypt"/>
-        <div style="height:8px"></div>
-        <button class="btn" id="doImport">Import</button>
-      </div>
-    </div>
-  `; },
+    `;
+  },
   wallets(){ 
     const addr = state.wallet?.address || '—';
     return `
@@ -107,7 +152,7 @@ const VIEWS = {
           <div id="sendOut" class="small"></div>
         </div>
         <div>
-          <div class="label">Inbox (last 20)</div>
+          <div class="label">Inbox (live)</div>
           <div id="inbox" class="small">—</div>
         </div>
       </div>
@@ -116,7 +161,7 @@ const VIEWS = {
   markets(){ 
     return `
       <div class="label">Live Markets</div>
-      <div class="small">BTC, ETH, SOL, MATIC, USDC — 60s refresh. Data from CoinGecko public API.</div>
+      <div class="small">BTC, ETH, SOL, MATIC, USDC — 60s refresh. Data via backend proxy to CoinGecko.</div>
       <hr class="sep"/>
       <div class="grid-2">
         ${['btc','eth','sol','matic','usdc'].map(id=>`
@@ -133,22 +178,41 @@ const VIEWS = {
       <div class="kv"><div>Auto-lock</div><div>10 minutes</div></div>
       <hr class="sep"/>
       <button class="btn" id="wipe">Delete vault (local)</button>
+
+      <hr class="sep"/>
+      <div class="label">Backup</div>
+      <div class="flex" style="gap:8px;">
+        <button class="btn" id="exportVault">Export vault (JSON)</button>
+        <label class="btn">
+          Import vault JSON
+          <input type="file" id="importVaultFile" accept="application/json" style="display:none"/>
+        </label>
+      </div>
+      <div class="small">Export this encrypted vault and import it on another device/origin to keep access.</div>
     `;
   }
 };
 
 function render(view){
+  // stop any XMTP stream if leaving Messaging
+  if (view !== 'messaging' && window._xmtpStreamCancel) { window._xmtpStreamCancel(); window._xmtpStreamCancel = null; }
+
   const root = $('#view');
   root.innerHTML = VIEWS[view]();
+
   if (view==='dashboard'){
     $('#gen').onclick = ()=>{ $('#mnemonic').value = ethers.Mnemonic.fromEntropy(ethers.randomBytes(16)).phrase; };
     $('#save').onclick = async ()=>{ const m = $('#mnemonic').value.trim(); const pw = $('#password').value; if (!m||!pw) return alert('Mnemonic+password required'); const enc = await aesEncrypt(pw,m); setVault({version:1,enc}); alert('Vault saved. Click Unlock.'); };
     $('#doImport').onclick = async ()=>{ const m = $('#mnemonicIn').value.trim(); const pw = $('#passwordIn').value; if (!m||!pw) return alert('Mnemonic+password required'); const enc = await aesEncrypt(pw,m); setVault({version:1,enc}); alert('Imported & saved. Click Unlock.'); };
+    $('#bannerUnlock')?.addEventListener('click', showLock);
   }
+
   if (view==='wallets'){
     $('#copyAddr').onclick = async ()=>{ if(!state.wallet) return; await navigator.clipboard.writeText(state.wallet.address); $('#out').textContent='Address copied.'; };
     $('#showPK').onclick = async ()=>{ if(!state.wallet) return; const pk = await state.wallet.getPublicKey(); $('#out').textContent='Public key: ' + pk; };
+    if (state.wallet) $('#out').textContent = 'Current address: ' + state.wallet.address;
   }
+
   if (view==='send'){
     $('#doSend').onclick = async ()=>{
       const to = $('#sendTo').value.trim(); const amt = $('#sendAmt').value.trim();
@@ -166,29 +230,80 @@ function render(view){
     };
     loadRecentTxs();
   }
+
   if (view==='messaging'){
     $('#msgStatus').textContent = 'Status: ' + (state.xmtp ? 'Connected' : 'Disconnected (unlock first)');
+
     $('#send').onclick = async ()=>{
       if (!state.xmtp) { $('#sendOut').textContent='Connect wallet (Unlock) first.'; return; }
       const peer = $('#peer').value.trim(); const txt = $('#msg').value.trim();
       if (!ethers.isAddress(peer)) { $('#sendOut').textContent='Enter valid 0x address'; return; }
-      try { const convo = await state.xmtp.conversations.newConversation(peer); await convo.send(txt || '(no text)'); $('#sendOut').textContent='Sent ✅'; } catch(e){ $('#sendOut').textContent='Error: ' + e.message; }
+      try {
+        // Optional: check recipient is on XMTP
+        const can = await XMTP.canMessage?.(peer, { env: 'production' }).catch(()=>true);
+        if (can === false) { $('#sendOut').textContent = 'Recipient is not registered on XMTP.'; return; }
+
+        const convo = await state.xmtp.conversations.newConversation(peer);
+        await convo.send(txt || '(no text)');
+        $('#sendOut').textContent='Sent ✅';
+        $('#msg').value='';
+        await loadInbox();
+      } catch(e){ $('#sendOut').textContent='Error: ' + (e.message||e); }
     };
-    if (state.xmtp){
-      (async ()=>{
-        const convos = await state.xmtp.conversations.list();
-        const latest = [];
-        for (const c of convos.slice(0,10)){
-          const msgs = await c.messages({ pageSize: 1, direction: 'descending' });
-          if (msgs.length) latest.push({ peer: c.peerAddress, text: msgs[0].content, at: msgs[0].sent });
+
+    (async ()=>{
+      if (!state.xmtp && state.wallet) {
+        try { await ensureXMTP(); } catch {}
+      }
+      if (!state.xmtp) { $('#inbox').textContent = 'Unlock first.'; return; }
+
+      $('#inbox').textContent = 'Loading…';
+      await loadInbox();
+
+      // cancel previous stream if any
+      if (window._xmtpStreamCancel) { window._xmtpStreamCancel(); window._xmtpStreamCancel = null; }
+
+      // live stream
+      const stream = await state.xmtp.conversations.streamAllMessages();
+      let cancelled = false;
+      window._xmtpStreamCancel = () => { cancelled = true; try { stream.return?.(); } catch {} };
+
+      (async () => {
+        for await (const _msg of stream) {
+          if (cancelled) break;
+          await loadInbox();
         }
-        latest.sort((a,b)=> b.at - a.at);
-        $('#inbox').innerHTML = latest.slice(0,20).map(m=>`<div class="kv"><div>${m.peer}</div><div>${new Date(m.at).toLocaleString()}</div></div><div class="small">${m.text}</div><hr class="sep"/>`).join('') || 'No messages yet.';
       })();
-    }
+    })();
   }
+
   if (view==='markets'){ renderMarkets(); }
-  if (view==='settings'){ $('#wipe').onclick = ()=>{ if(confirm('Delete the local encrypted vault?')){ localStorage.removeItem(STORAGE_KEY); lock(); alert('Deleted.'); } }; }
+
+  if (view==='settings'){
+    $('#wipe').onclick = ()=>{ if(confirm('Delete the local encrypted vault?')){ localStorage.removeItem(STORAGE_KEY); lock(); alert('Deleted.'); } };
+
+    $('#exportVault').onclick = ()=>{
+      const v = getVault();
+      if (!v) return alert('No vault to export.');
+      const blob = new Blob([JSON.stringify(v,null,2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'xwallet_vault.json';
+      a.click();
+    };
+    $('#importVaultFile').onchange = async (e)=>{
+      const f = e.target.files?.[0]; if (!f) return;
+      try{
+        const text = await f.text();
+        const json = JSON.parse(text);
+        if (!json?.enc?.ct) throw new Error('Invalid vault file.');
+        setVault(json);
+        alert('Vault imported. Click Unlock.');
+      }catch(err){
+        alert('Import failed: ' + (err.message||err));
+      }
+    };
+  }
 }
 
 // lock modal
@@ -202,9 +317,22 @@ $('#doUnlock').onclick = async ()=>{
     const v = getVault(); if (!v) { $('#unlockMsg').textContent='No vault found.'; return; }
     const pw = $('#unlockPassword').value; const phrase = await aesDecrypt(pw, v.enc);
     const wallet = ethers.HDNodeWallet.fromPhrase(phrase);
-    state.wallet = wallet; state.unlocked = true; $('#lockState').textContent='Unlocked'; hideLock(); scheduleAutoLock();
-    state.provider = new ethers.JsonRpcProvider(RPCS.sep); state.signer = state.wallet.connect(state.provider);
-    try{ state.xmtp = await XMTP.Client.create({ getAddress: async ()=> state.wallet.address, sign: async (msg)=> await state.wallet.signMessage(msg) }, { env: 'production' }); }catch(e){ console.warn('XMTP init failed', e); }
+
+    // state
+    state.decryptedPhrase = phrase; // kept only in memory while unlocked
+    state.wallet = wallet; 
+    state.unlocked = true; 
+    $('#lockState').textContent='Unlocked'; 
+    hideLock(); 
+    scheduleAutoLock();
+
+    // provider/signer
+    state.provider = new ethers.JsonRpcProvider(RPCS.sep); 
+    state.signer = state.wallet.connect(state.provider);
+
+    // XMTP
+    try { await ensureXMTP(); } catch(e){ console.warn('XMTP init failed', e); }
+
     selectItem('wallets');
   }catch(e){ console.error(e); $('#unlockMsg').textContent = 'Wrong password (or corrupted vault).'; }
 };
@@ -265,30 +393,26 @@ async function loadRecentTxs(){
   }catch(e){ console.warn(e); }
 }
 
-// markets
+// markets (via backend proxy)
 async function fetchMarket(id){
   try{
-    // derive backend base (works for localhost & production)
     const backendBase = SAFE_SEND_URL.replace(/\/check$/, "");
     const u = new URL(backendBase + "/market/chart");
     u.searchParams.set("id", id);
     u.searchParams.set("days", "1");
     u.searchParams.set("interval", "minute");
-
     const r = await fetch(u.toString());
     if (!r.ok) throw new Error("backend market error");
     const j = await r.json();
     return (j.prices || []).slice(-120).map(([t, v]) => ({ t, v }));
   } catch (e) {
     console.warn("Market fetch failed (via backend)", id, e);
-    // graceful fallback sparkline
     return Array.from({ length: 60 }, (_, i) => ({
       t: Date.now() - (60 - i) * 60000,
       v: 100 + (Math.random() - 0.5) * i
     }));
   }
 }
-
 async function renderMarkets(){
   const assets = [
     {id:'bitcoin', el:'mk_btc'},
@@ -309,3 +433,6 @@ async function renderMarkets(){
   }
   setTimeout(renderMarkets, 60000);
 }
+
+// Optional: auto-prompt unlock when a vault exists
+try { if (getVault()) showLock(); } catch {}
