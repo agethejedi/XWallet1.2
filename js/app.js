@@ -64,7 +64,7 @@ async function ensureXMTP() {
 
 // ----- Inbox helper (latest from each conversation) -----
 async function loadInbox() {
-  if (!state.xmtp) { $('#inbox')?.textContent = 'Connect wallet (Unlock) first.'; return; }
+  if (!state.xmtp) { $('#inbox')?.textContent = 'Connect wallet (Unlock) first.'; return; 
   const convos = await state.xmtp.conversations.list();
   const latest = [];
   for (const c of convos.slice(0, 20)) {
