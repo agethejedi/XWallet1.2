@@ -64,22 +64,26 @@ async function ensureXMTP() {
 
 // ----- Inbox helper (latest from each conversation) -----
 async function loadInbox() {
-  if (!state.xmtp) { $('#inbox')?.textContent = 'Connect wallet (Unlock) first.'; return; 
+  if (!state.xmtp) {
+    const el = document.getElementById('inbox');
+    if (el) el.textContent = 'Connect wallet (Unlock) first.';
+    return;
+  }
   const convos = await state.xmtp.conversations.list();
   const latest = [];
   for (const c of convos.slice(0, 20)) {
     const msgs = await c.messages({ pageSize: 1, direction: 'descending' });
     if (msgs.length) latest.push({ peer: c.peerAddress, text: msgs[0].content, at: msgs[0].sent });
   }
-  latest.sort((a,b)=> b.at - a.at);
+  latest.sort((a, b) => b.at - a.at);
   const el = document.getElementById('inbox');
   if (!el) return;
-  el.innerHTML =
-    latest.map(m =>
-      `<div class="kv"><div>${m.peer}</div><div>${new Date(m.at).toLocaleString()}</div></div>
-       <div class="small">${m.text}</div><hr class="sep"/>`
-    ).join('') || 'No messages yet.';
+  el.innerHTML = latest.map(m => `
+    <div class="kv"><div>${m.peer}</div><div>${new Date(m.at).toLocaleString()}</div></div>
+    <div class="small">${m.text}</div><hr class="sep"/>
+  `).join('') || 'No messages yet.';
 }
+
 
 // views
 const VIEWS = {
