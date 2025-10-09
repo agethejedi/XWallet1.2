@@ -306,6 +306,23 @@ function render(view){
   }
 }
 
+// --- NAV: wire up sidebar and show initial view ---
+function selectItem(view) {
+  // toggle active state in sidebar
+  $$('.sidebar .item').forEach(el => el.classList.toggle('active', el.dataset.view === view));
+  // render that view
+  render(view);
+}
+
+// attach click handlers to sidebar items
+$$('.sidebar .item').forEach(el => {
+  el.onclick = () => selectItem(el.dataset.view);
+});
+
+// show dashboard by default
+selectItem('dashboard');
+
+
 // lock modal
 function showLock(){ $('#lockModal').classList.add('active'); $('#unlockPassword').value=''; $('#unlockMsg').textContent=''; }
 function hideLock(){ $('#lockModal').classList.remove('active'); }
