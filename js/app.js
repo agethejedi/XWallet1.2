@@ -2,33 +2,32 @@
 const { ethers } = window;
 const XMTP = window.XMTP;
 
-
 // ---- CONFIG (EDIT) ----
 const RPCS = {
   sep: 'https://eth-sepolia.g.alchemy.com/v2/kxHg5y9yBXWAb9cOcJsf0' // <-- replace
 };
-const SAFE_SEND_URL = 'http://localhost:3001/check'; // <-- replace or run stub
+const SAFE_SEND_URL = 'https://safesend-worker.agedotcom.workers.dev/check';
 
 // helpers
-const $ = (q) => document.querySelector(q);
+const $  = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
 
 // AES-GCM + PBKDF2 vault
 async function aesEncrypt(password, plaintext){
-  const enc = new TextEncoder();
+  const enc  = new TextEncoder();
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const km = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:100000, hash:'SHA-256'}, km, {name:'AES-GCM', length:256}, false, ['encrypt']);
-  const ct = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, enc.encode(plaintext)));
+  const iv   = crypto.getRandomValues(new Uint8Array(12));
+  const km   = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
+  const key  = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:100000, hash:'SHA-256'}, km, {name:'AES-GCM', length:256}, false, ['encrypt']);
+  const ct   = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, enc.encode(plaintext)));
   return { ct: Array.from(ct), iv: Array.from(iv), salt: Array.from(salt) };
 }
 async function aesDecrypt(password, payload){
   const dec = new TextDecoder();
   const { ct, iv, salt } = payload;
-  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt:new Uint8Array(salt), iterations:100000, hash:'SHA-256'}, km, {name:'AES-GCM', length:256}, false, ['decrypt']);
-  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:new Uint8Array(iv)}, key, new Uint8Array(ct));
+  const km   = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
+  const key  = await crypto.subtle.deriveKey({name:'PBKDF2', salt:new Uint8Array(salt), iterations:100000, hash:'SHA-256'}, km, {name:'AES-GCM', length:256}, false, ['decrypt']);
+  const pt   = await crypto.subtle.decrypt({name:'AES-GCM', iv:new Uint8Array(iv)}, key, new Uint8Array(ct));
   return dec.decode(pt);
 }
 
@@ -111,15 +110,12 @@ const VIEWS = {
     `;
   },
   markets(){ 
+    // Watchlist UI (no Chart.js)
     return `
-      <div class="label">Live Markets</div>
-      <div class="small">BTC, ETH, SOL, MATIC, USDC — 60s refresh. Data from CoinGecko public API.</div>
+      <div class="label">Market Watchlist</div>
+      <div class="small">Live prices via CoinGecko (auto-refresh every 60s)</div>
       <hr class="sep"/>
-      <div class="grid-2">
-        ${['btc','eth','sol','matic','usdc'].map(id=>`
-          <div class="card chart-card"><header><b>${id.toUpperCase()}</b></header><div class="chart-wrap" style="height:160px"><canvas id="mk_${id}"></canvas></div></div>
-        `).join('')}
-      </div>
+      <div id="watchlist" class="small">Loading…</div>
     `;
   },
   settings(){ 
@@ -137,15 +133,18 @@ const VIEWS = {
 function render(view){
   const root = $('#view');
   root.innerHTML = VIEWS[view]();
+
   if (view==='dashboard'){
     $('#gen').onclick = ()=>{ $('#mnemonic').value = ethers.Mnemonic.fromEntropy(ethers.randomBytes(16)).phrase; };
     $('#save').onclick = async ()=>{ const m = $('#mnemonic').value.trim(); const pw = $('#password').value; if (!m||!pw) return alert('Mnemonic+password required'); const enc = await aesEncrypt(pw,m); setVault({version:1,enc}); alert('Vault saved. Click Unlock.'); };
     $('#doImport').onclick = async ()=>{ const m = $('#mnemonicIn').value.trim(); const pw = $('#passwordIn').value; if (!m||!pw) return alert('Mnemonic+password required'); const enc = await aesEncrypt(pw,m); setVault({version:1,enc}); alert('Imported & saved. Click Unlock.'); };
   }
+
   if (view==='wallets'){
     $('#copyAddr').onclick = async ()=>{ if(!state.wallet) return; await navigator.clipboard.writeText(state.wallet.address); $('#out').textContent='Address copied.'; };
     $('#showPK').onclick = async ()=>{ if(!state.wallet) return; const pk = await state.wallet.getPublicKey(); $('#out').textContent='Public key: ' + pk; };
   }
+
   if (view==='send'){
     $('#doSend').onclick = async ()=>{
       const to = $('#sendTo').value.trim(); const amt = $('#sendAmt').value.trim();
@@ -163,13 +162,18 @@ function render(view){
     };
     loadRecentTxs();
   }
+
   if (view==='messaging'){
     $('#msgStatus').textContent = 'Status: ' + (state.xmtp ? 'Connected' : 'Disconnected (unlock first)');
     $('#send').onclick = async ()=>{
       if (!state.xmtp) { $('#sendOut').textContent='Connect wallet (Unlock) first.'; return; }
       const peer = $('#peer').value.trim(); const txt = $('#msg').value.trim();
       if (!ethers.isAddress(peer)) { $('#sendOut').textContent='Enter valid 0x address'; return; }
-      try { const convo = await state.xmtp.conversations.newConversation(peer); await convo.send(txt || '(no text)'); $('#sendOut').textContent='Sent ✅'; } catch(e){ $('#sendOut').textContent='Error: ' + e.message; }
+      try { 
+        const convo = await state.xmtp.conversations.newConversation(peer); 
+        await convo.send(txt || '(no text)'); 
+        $('#sendOut').textContent='Sent ✅'; 
+      } catch(e){ $('#sendOut').textContent='Error: ' + e.message; }
     };
     if (state.xmtp){
       (async ()=>{
@@ -184,8 +188,12 @@ function render(view){
       })();
     }
   }
+
   if (view==='markets'){ renderMarkets(); }
-  if (view==='settings'){ $('#wipe').onclick = ()=>{ if(confirm('Delete the local encrypted vault?')){ localStorage.removeItem(STORAGE_KEY); lock(); alert('Deleted.'); } }; }
+
+  if (view==='settings'){
+    $('#wipe').onclick = ()=>{ if(confirm('Delete the local encrypted vault?')){ localStorage.removeItem(STORAGE_KEY); lock(); alert('Deleted.'); } };
+  }
 }
 
 // lock modal
@@ -229,7 +237,6 @@ async function fetchSafeSend(address) {
   }
 }
 
-
 // Provider + send
 async function getProvider(chain='sep'){ if (!RPCS[chain]) throw new Error('RPC not configured for ' + chain); return new ethers.JsonRpcProvider(RPCS[chain]); }
 async function connectWalletToProvider(chain='sep'){ if (!state.wallet) throw new Error('Unlock first'); const provider = await getProvider(chain); state.provider = provider; state.signer = state.wallet.connect(provider); return state.signer; }
@@ -263,34 +270,37 @@ async function loadRecentTxs(){
   }catch(e){ console.warn(e); }
 }
 
-// markets
-async function fetchMarket(id){
-  try{
-    const r = await fetch(`https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=usd&days=1&interval=minute`);
-    const j = await r.json();
-    return (j.prices||[]).slice(-120).map(([t,v])=>({t, v}));
-  }catch(e){
-    console.warn('Market fetch failed', id, e);
-    return Array.from({length:60},(_,i)=>({t:Date.now()- (60-i)*60000, v: 100 + (Math.random()-0.5)*i}));
-  }
-}
-async function renderMarkets(){
+// ---- Simpler Market Watchlist (replaces Chart.js charts) ----
+async function renderMarkets() {
   const assets = [
-    {id:'bitcoin', el:'mk_btc'},
-    {id:'ethereum', el:'mk_eth'},
-    {id:'solana', el:'mk_sol'},
-    {id:'matic-network', el:'mk_matic'},
-    {id:'usd-coin', el:'mk_usdc'}
+    { id: 'bitcoin', symbol: 'BTC' },
+    { id: 'ethereum', symbol: 'ETH' },
+    { id: 'solana', symbol: 'SOL' },
+    { id: 'matic-network', symbol: 'MATIC' },
+    { id: 'usd-coin', symbol: 'USDC' }
   ];
-  for (const a of assets){
-    const data = await fetchMarket(a.id);
-    const el = document.getElementById(a.el); if (!el) continue;
-    const ctx = el.getContext('2d');
-    new Chart(ctx, {
-      type:'line',
-      data:{ labels: data.map(p=>new Date(p.t).toLocaleTimeString()), datasets:[{ data: data.map(p=>p.v), tension:.25, pointRadius:0 }]},
-      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{enabled:true}}, scales:{x:{display:false}, y:{display:false}} }
-    });
+
+  const container = document.getElementById('watchlist');
+  if (!container) return;
+
+  async function update() {
+    const rows = [];
+    for (const a of assets) {
+      try {
+        const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${a.id}&vs_currencies=usd&include_24hr_change=true`);
+        const j = await r.json();
+        const data = j[a.id];
+        const price = (data?.usd ?? 0).toFixed(2);
+        const change = Number(data?.usd_24h_change ?? 0).toFixed(2);
+        const color = Number(change) >= 0 ? 'style="color:#16a34a"' : 'style="color:#ef4444"';
+        rows.push(`<div class="kv"><div><b>${a.symbol}</b></div><div>$${price} <span ${color}>(${change}%)</span></div></div>`);
+      } catch (e) {
+        rows.push(`<div class="kv"><div>${a.symbol}</div><div>⚠️ Error</div></div>`);
+      }
+    }
+    container.innerHTML = rows.join('');
   }
-  setTimeout(renderMarkets, 60000);
+
+  await update();
+  setInterval(update, 60_000);
 }
