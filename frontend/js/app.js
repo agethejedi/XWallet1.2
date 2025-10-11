@@ -7,9 +7,8 @@ const RPCS = {
    mainnet: "https://mainnet.infura.io/v3/0883fc4e792c4b78aa435b2332790b73",
     polygon: "https://polygon-mainnet.infura.io/v3/0883fc4e792c4b78aa435b2332790b73"
 };
-const SAFE_SEND_URL = 'https://safesend-worker. 
-xwallet1-2.pages.dev./check';
-/ <-- replace or run stub
+const SAFE_SEND_URL = 'https://safesend-worker.agedotcom.workers.dev/check';
+// <-- replace or run stub
 // ---- SafeSend Integration ----
 async function runSafeSendCheck(provider, to) {
   const chainMap = {
