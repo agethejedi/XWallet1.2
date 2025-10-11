@@ -1,4 +1,5 @@
-// worker.js — SafeSend Worker by RiskXLabs (fixed CORS)
+// worker.js — SafeSend + Market Price Worker by RiskXLabs
+
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
@@ -10,24 +11,25 @@ export default {
     }
 
     if (url.pathname === "/health") {
-      return json({ ok: true, build: "safesend-cloudflare-v1.0" }, 200, origin);
+      return json({ ok: true, build: "safesend-cloudflare-v2.0" }, 200, origin);
     }
 
     if (url.pathname === "/check") {
       return handleCheck(url, env, origin);
     }
 
-    if (url.pathname === "/market/chart") {
-      return handleMarket(url, env, origin);
+    if (url.pathname === "/market/price") {
+      return handlePrice(url, env, origin);
     }
 
     return new Response("Not Found", { status: 404, headers: corsHeaders(origin) });
   },
 };
 
-// ---- Helpers ----
+/* ----------------------------- Helpers ----------------------------- */
+
 function corsHeaders(origin) {
-  // Allow your GitHub Pages origin + localhost for dev
+  // Allow your GitHub Pages origin + local dev
   const ALLOW = new Set([
     "https://agethejedi.github.io",
     "http://localhost:8080",
@@ -51,10 +53,11 @@ function json(data, status = 200, origin = "") {
   });
 }
 
-// ---- /check (SafeSend risk evaluator) ----
+/* ---------------------------- /check ------------------------------- */
+/* SafeSend risk evaluator backed by Etherscan-style explorers */
 async function handleCheck(url, env, origin) {
   const address = (url.searchParams.get("address") || "").toLowerCase();
-  const chain = (url.searchParams.get("chain") || "sepolia").toLowerCase();
+  const chain   = (url.searchParams.get("chain") || "sepolia").toLowerCase();
 
   if (!address.startsWith("0x")) return json({ error: "address required" }, 400, origin);
 
@@ -76,7 +79,7 @@ async function handleCheck(url, env, origin) {
   let score = 20;
   const findings = [];
 
-  // 1. Contract code check
+  // 1) Contract code check
   try {
     const codeUrl = `https://${host}/api?module=proxy&action=eth_getCode&address=${address}&tag=latest&apikey=${env.ETHERSCAN_API_KEY}`;
     const codeRes = await fetch(codeUrl);
@@ -85,11 +88,11 @@ async function handleCheck(url, env, origin) {
       score += 30;
       findings.push("Address is a contract");
     }
-  } catch (e) {
+  } catch {
     findings.push("Etherscan code check failed");
   }
 
-  // 2. Transaction age
+  // 2) Transaction age
   try {
     const txUrl = `https://${host}/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${env.ETHERSCAN_API_KEY}`;
     const txRes = await fetch(txUrl);
@@ -112,7 +115,7 @@ async function handleCheck(url, env, origin) {
     } else {
       findings.push("Explorer returned no tx data");
     }
-  } catch (e) {
+  } catch {
     findings.push("Etherscan tx fetch failed");
   }
 
@@ -120,17 +123,17 @@ async function handleCheck(url, env, origin) {
   return json({ score, findings }, 200, origin);
 }
 
-// ---- /market/chart (CoinGecko proxy) ----
-async function handleMarket(url, env, origin) {
-  const id = (url.searchParams.get("id") || "ethereum").toLowerCase();
-  const days = url.searchParams.get("days") || "1";
-  const interval = url.searchParams.get("interval") || "minute";
+/* ------------------------- /market/price --------------------------- */
+/* Batch CoinGecko simple/price with 60s edge caching + CORS */
+async function handlePrice(url, env, origin) {
+  const ids  = (url.searchParams.get("ids") || "bitcoin,ethereum").toLowerCase();
+  const vs   = (url.searchParams.get("vs")  || "usd").toLowerCase();
+  const chg  = (url.searchParams.get("change") || "true").toLowerCase();
 
-  const cgUrl = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(
-    id
-  )}/market_chart?vs_currency=usd&days=${encodeURIComponent(
-    days
-  )}&interval=${encodeURIComponent(interval)}`;
+  const cgUrl = `https://api.coingecko.com/api/v3/simple/price` +
+                `?ids=${encodeURIComponent(ids)}` +
+                `&vs_currencies=${encodeURIComponent(vs)}` +
+                `&include_24hr_change=${encodeURIComponent(chg)}`;
 
   const headers = {};
   if (env.COINGECKO_API_KEY) headers["x-cg-pro-api-key"] = env.COINGECKO_API_KEY;
@@ -140,7 +143,12 @@ async function handleMarket(url, env, origin) {
       headers,
       cf: { cacheTtl: 60, cacheEverything: true },
     });
-    if (!res.ok) return json({ error: "coingecko_failed", status: res.status }, res.status, origin);
+    if (!res.ok) {
+      return new Response(JSON.stringify({ error: "coingecko_failed", status: res.status }), {
+        status: res.status,
+        headers: { "content-type": "application/json", ...corsHeaders(origin) },
+      });
+    }
     const data = await res.json();
     return new Response(JSON.stringify(data), {
       status: 200,
