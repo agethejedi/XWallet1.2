@@ -1,34 +1,50 @@
-// worker.js — SafeSend Worker by RiskXLabs
+// worker.js — SafeSend Worker by RiskXLabs (fixed CORS)
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    const origin = req.headers.get("Origin") || "";
 
-    // Handle CORS preflight
+    // CORS preflight
     if (req.method === "OPTIONS") {
-      return new Response(null, { headers: corsHeaders(url.origin) });
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
     if (url.pathname === "/health") {
-      return json({ ok: true, build: "safesend-cloudflare-v1.0" });
+      return json({ ok: true, build: "safesend-cloudflare-v1.0" }, 200, origin);
     }
 
-    if (url.pathname === "/check") return handleCheck(url, env);
-    if (url.pathname === "/market/chart") return handleMarket(url, env);
+    if (url.pathname === "/check") {
+      return handleCheck(url, env, origin);
+    }
 
-    return new Response("Not Found", { status: 404, headers: corsHeaders(url.origin) });
+    if (url.pathname === "/market/chart") {
+      return handleMarket(url, env, origin);
+    }
+
+    return new Response("Not Found", { status: 404, headers: corsHeaders(origin) });
   },
 };
 
 // ---- Helpers ----
 function corsHeaders(origin) {
+  // Allow your GitHub Pages origin + localhost for dev
+  const ALLOW = new Set([
+    "https://agethejedi.github.io",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+  ]);
+
+  const allowed = origin && ALLOW.has(origin);
   return {
-    "Access-Control-Allow-Origin": "https://agethejedi.github.io" // Replace * with your GitHub Pages domain for security
+    "Access-Control-Allow-Origin": allowed ? origin : "https://agethejedi.github.io",
+    "Vary": "Origin",
     "Access-Control-Allow-Methods": "GET,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
   };
 }
 
-function json(data, status = 200, origin = "*") {
+function json(data, status = 200, origin = "") {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json", ...corsHeaders(origin) },
@@ -36,11 +52,11 @@ function json(data, status = 200, origin = "*") {
 }
 
 // ---- /check (SafeSend risk evaluator) ----
-async function handleCheck(url, env) {
+async function handleCheck(url, env, origin) {
   const address = (url.searchParams.get("address") || "").toLowerCase();
   const chain = (url.searchParams.get("chain") || "sepolia").toLowerCase();
 
-  if (!address.startsWith("0x")) return json({ error: "address required" }, 400);
+  if (!address.startsWith("0x")) return json({ error: "address required" }, 400, origin);
 
   const HOSTS = {
     sepolia: "api-sepolia.etherscan.io",
@@ -53,9 +69,9 @@ async function handleCheck(url, env) {
   const allowlist = new Set();
 
   if (blocklist.has(address))
-    return json({ score: 95, findings: ["Blocklist match: known scam"] });
+    return json({ score: 95, findings: ["Blocklist match: known scam"] }, 200, origin);
   if (allowlist.has(address))
-    return json({ score: 5, findings: ["Allowlist: known good address"] });
+    return json({ score: 5, findings: ["Allowlist: known good address"] }, 200, origin);
 
   let score = 20;
   const findings = [];
@@ -101,11 +117,11 @@ async function handleCheck(url, env) {
   }
 
   score = Math.max(0, Math.min(100, score));
-  return json({ score, findings });
+  return json({ score, findings }, 200, origin);
 }
 
 // ---- /market/chart (CoinGecko proxy) ----
-async function handleMarket(url, env) {
+async function handleMarket(url, env, origin) {
   const id = (url.searchParams.get("id") || "ethereum").toLowerCase();
   const days = url.searchParams.get("days") || "1";
   const interval = url.searchParams.get("interval") || "minute";
@@ -124,17 +140,17 @@ async function handleMarket(url, env) {
       headers,
       cf: { cacheTtl: 60, cacheEverything: true },
     });
-    if (!res.ok) return json({ error: "coingecko_failed", status: res.status }, res.status);
+    if (!res.ok) return json({ error: "coingecko_failed", status: res.status }, res.status, origin);
     const data = await res.json();
     return new Response(JSON.stringify(data), {
       status: 200,
       headers: {
         "content-type": "application/json",
-        ...corsHeaders("*"),
+        ...corsHeaders(origin),
         "Cache-Control": "public, max-age=60",
       },
     });
   } catch (e) {
-    return json({ error: "market_fetch_failed", message: e.message }, 500);
+    return json({ error: "market_fetch_failed", message: e.message }, 500, origin);
   }
 }
