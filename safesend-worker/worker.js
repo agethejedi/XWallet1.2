@@ -28,7 +28,6 @@ export default {
 
 // ---- Helpers ----
 function corsHeaders(origin) {
-  // Allow your GitHub Pages origin + localhost for dev
   const ALLOW = new Set([
     "https://agethejedi.github.io",
     "http://localhost:8080",
@@ -44,7 +43,6 @@ function corsHeaders(origin) {
     "Access-Control-Max-Age": "86400",
   };
 }
-
 function json(data, status = 200, origin = "") {
   return new Response(JSON.stringify(data), {
     status,
@@ -75,7 +73,6 @@ async function handleCheck(url, env, origin) {
   let score = 20;
   const findings = [];
 
-  // 1) Contract code check
   try {
     const codeUrl = `https://${host}/api?module=proxy&action=eth_getCode&address=${address}&tag=latest&apikey=${env.ETHERSCAN_API_KEY}`;
     const codeRes = await fetch(codeUrl);
@@ -88,7 +85,6 @@ async function handleCheck(url, env, origin) {
     findings.push("Etherscan code check failed");
   }
 
-  // 2) TX history / age
   try {
     const txUrl = `https://${host}/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${env.ETHERSCAN_API_KEY}`;
     const txRes = await fetch(txUrl);
@@ -116,8 +112,7 @@ async function handleCheck(url, env, origin) {
 
 // ---- /market/price (CoinGecko simple price proxy) ----
 async function handlePrice(url, env, origin) {
-  // expects: ids=bitcoin,ethereum&vs=usd (vs default usd)
-  const ids = (url.searchParams.get("ids") || "").trim();
+  const ids = (url.searchParams.get("ids") || "").trim(); // e.g. bitcoin,ethereum,solana
   const vs = (url.searchParams.get("vs") || "usd").trim();
 
   if (!ids) return json({ error: "ids required" }, 400, origin);
@@ -134,7 +129,6 @@ async function handlePrice(url, env, origin) {
     });
     if (!res.ok) return json({ error: "coingecko_failed", status: res.status }, res.status, origin);
     const data = await res.json();
-    // pass through with CORS + small CDN cache
     return new Response(JSON.stringify(data), {
       status: 200,
       headers: {
