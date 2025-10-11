@@ -1,4 +1,4 @@
-// worker.js — SafeSend Worker by RiskXLabs (check + market/price + strict CORS)
+// worker.js — SafeSend Worker by RiskXLabs (check + price proxy)
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
@@ -17,7 +17,7 @@ export default {
       return handleCheck(url, env, origin);
     }
 
-    // NEW: simple price proxy (for watchlist)
+    // NEW: simple price proxy for watchlist
     if (url.pathname === "/market/price") {
       return handlePrice(url, env, origin);
     }
@@ -26,15 +26,16 @@ export default {
   },
 };
 
-/* ----------------- CORS helpers ----------------- */
+// ---- Helpers ----
 function corsHeaders(origin) {
-  // allow only these origins (add more if needed)
+  // Allow your GitHub Pages origin + localhost for dev
   const ALLOW = new Set([
-    "https://agethejedi.github.io",   // GitHub Pages
+    "https://agethejedi.github.io",
     "http://localhost:8080",
     "http://127.0.0.1:8080",
   ]);
   const allowed = origin && ALLOW.has(origin);
+
   return {
     "Access-Control-Allow-Origin": allowed ? origin : "https://agethejedi.github.io",
     "Vary": "Origin",
@@ -51,7 +52,7 @@ function json(data, status = 200, origin = "") {
   });
 }
 
-/* ----------------- /check (SafeSend) ----------------- */
+// ---- /check (SafeSend risk evaluator) ----
 async function handleCheck(url, env, origin) {
   const address = (url.searchParams.get("address") || "").toLowerCase();
   const chain = (url.searchParams.get("chain") || "sepolia").toLowerCase();
@@ -68,15 +69,13 @@ async function handleCheck(url, env, origin) {
   const blocklist = new Set(["0x000000000000000000000000000000000000dead"]);
   const allowlist = new Set();
 
-  if (blocklist.has(address))
-    return json({ score: 95, findings: ["Blocklist match: known scam"] }, 200, origin);
-  if (allowlist.has(address))
-    return json({ score: 5, findings: ["Allowlist: known good address"] }, 200, origin);
+  if (blocklist.has(address)) return json({ score: 95, findings: ["Blocklist match: known scam"] }, 200, origin);
+  if (allowlist.has(address)) return json({ score: 5, findings: ["Allowlist: known good address"] }, 200, origin);
 
   let score = 20;
   const findings = [];
 
-  // 1) contract code?
+  // 1) Contract code check
   try {
     const codeUrl = `https://${host}/api?module=proxy&action=eth_getCode&address=${address}&tag=latest&apikey=${env.ETHERSCAN_API_KEY}`;
     const codeRes = await fetch(codeUrl);
@@ -89,7 +88,7 @@ async function handleCheck(url, env, origin) {
     findings.push("Etherscan code check failed");
   }
 
-  // 2) tx age
+  // 2) TX history / age
   try {
     const txUrl = `https://${host}/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${env.ETHERSCAN_API_KEY}`;
     const txRes = await fetch(txUrl);
@@ -101,11 +100,8 @@ async function handleCheck(url, env, origin) {
       } else {
         const first = list[0];
         const ageSec = Date.now() / 1000 - Number(first.timeStamp || 0);
-        if (ageSec < 48 * 3600) {
-          score += 20; findings.push("Very new address (<2 days)");
-        } else {
-          findings.push("Has transaction history");
-        }
+        if (ageSec < 48 * 3600) { score += 20; findings.push("Very new address (<2 days)"); }
+        else { findings.push("Has transaction history"); }
       }
     } else {
       findings.push("Explorer returned no tx data");
@@ -118,11 +114,11 @@ async function handleCheck(url, env, origin) {
   return json({ score, findings }, 200, origin);
 }
 
-/* ----------------- /market/price (watchlist) ----------------- */
+// ---- /market/price (CoinGecko simple price proxy) ----
 async function handlePrice(url, env, origin) {
-  // expects: /market/price?ids=bitcoin,ethereum&vs=usd
+  // expects: ids=bitcoin,ethereum&vs=usd (vs default usd)
   const ids = (url.searchParams.get("ids") || "").trim();
-  const vs  = (url.searchParams.get("vs")  || "usd").trim();
+  const vs = (url.searchParams.get("vs") || "usd").trim();
 
   if (!ids) return json({ error: "ids required" }, 400, origin);
 
@@ -134,17 +130,17 @@ async function handlePrice(url, env, origin) {
   try {
     const res = await fetch(cgUrl, {
       headers,
-      // cache for 60s to avoid 429s
-      cf: { cacheTtl: 60, cacheEverything: true },
+      cf: { cacheTtl: 30, cacheEverything: true },
     });
     if (!res.ok) return json({ error: "coingecko_failed", status: res.status }, res.status, origin);
     const data = await res.json();
+    // pass through with CORS + small CDN cache
     return new Response(JSON.stringify(data), {
       status: 200,
       headers: {
         "content-type": "application/json",
         ...corsHeaders(origin),
-        "Cache-Control": "public, max-age=60",
+        "Cache-Control": "public, max-age=30",
       },
     });
   } catch (e) {
