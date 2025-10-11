@@ -22,7 +22,7 @@ export default {
 // ---- Helpers ----
 function corsHeaders(origin) {
   return {
-    "Access-Control-Allow-Origin": origin || "*", // Replace * with your GitHub Pages domain for security
+    "Access-Control-Allow-Origin": "https://agethejedi.github.io" // Replace * with your GitHub Pages domain for security
     "Access-Control-Allow-Methods": "GET,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };
