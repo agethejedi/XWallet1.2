@@ -1,5 +1,4 @@
-// worker.js — SafeSend + Market Price Worker by RiskXLabs
-
+// worker.js — SafeSend Worker by RiskXLabs (check + market/price + strict CORS)
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
@@ -11,13 +10,14 @@ export default {
     }
 
     if (url.pathname === "/health") {
-      return json({ ok: true, build: "safesend-cloudflare-v2.0" }, 200, origin);
+      return json({ ok: true, build: "safesend-cloudflare-v1.1" }, 200, origin);
     }
 
     if (url.pathname === "/check") {
       return handleCheck(url, env, origin);
     }
 
+    // NEW: simple price proxy (for watchlist)
     if (url.pathname === "/market/price") {
       return handlePrice(url, env, origin);
     }
@@ -26,16 +26,14 @@ export default {
   },
 };
 
-/* ----------------------------- Helpers ----------------------------- */
-
+/* ----------------- CORS helpers ----------------- */
 function corsHeaders(origin) {
-  // Allow your GitHub Pages origin + local dev
+  // allow only these origins (add more if needed)
   const ALLOW = new Set([
-    "https://agethejedi.github.io",
+    "https://agethejedi.github.io",   // GitHub Pages
     "http://localhost:8080",
     "http://127.0.0.1:8080",
   ]);
-
   const allowed = origin && ALLOW.has(origin);
   return {
     "Access-Control-Allow-Origin": allowed ? origin : "https://agethejedi.github.io",
@@ -53,11 +51,10 @@ function json(data, status = 200, origin = "") {
   });
 }
 
-/* ---------------------------- /check ------------------------------- */
-/* SafeSend risk evaluator backed by Etherscan-style explorers */
+/* ----------------- /check (SafeSend) ----------------- */
 async function handleCheck(url, env, origin) {
   const address = (url.searchParams.get("address") || "").toLowerCase();
-  const chain   = (url.searchParams.get("chain") || "sepolia").toLowerCase();
+  const chain = (url.searchParams.get("chain") || "sepolia").toLowerCase();
 
   if (!address.startsWith("0x")) return json({ error: "address required" }, 400, origin);
 
@@ -79,7 +76,7 @@ async function handleCheck(url, env, origin) {
   let score = 20;
   const findings = [];
 
-  // 1) Contract code check
+  // 1) contract code?
   try {
     const codeUrl = `https://${host}/api?module=proxy&action=eth_getCode&address=${address}&tag=latest&apikey=${env.ETHERSCAN_API_KEY}`;
     const codeRes = await fetch(codeUrl);
@@ -92,7 +89,7 @@ async function handleCheck(url, env, origin) {
     findings.push("Etherscan code check failed");
   }
 
-  // 2) Transaction age
+  // 2) tx age
   try {
     const txUrl = `https://${host}/api?module=account&action=txlist&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${env.ETHERSCAN_API_KEY}`;
     const txRes = await fetch(txUrl);
@@ -100,14 +97,12 @@ async function handleCheck(url, env, origin) {
     if (txs.status === "1") {
       const list = txs.result || [];
       if (list.length === 0) {
-        score += 30;
-        findings.push("New address — no transaction history");
+        score += 30; findings.push("New address — no transaction history");
       } else {
         const first = list[0];
         const ageSec = Date.now() / 1000 - Number(first.timeStamp || 0);
         if (ageSec < 48 * 3600) {
-          score += 20;
-          findings.push("Very new address (<2 days)");
+          score += 20; findings.push("Very new address (<2 days)");
         } else {
           findings.push("Has transaction history");
         }
@@ -123,17 +118,15 @@ async function handleCheck(url, env, origin) {
   return json({ score, findings }, 200, origin);
 }
 
-/* ------------------------- /market/price --------------------------- */
-/* Batch CoinGecko simple/price with 60s edge caching + CORS */
+/* ----------------- /market/price (watchlist) ----------------- */
 async function handlePrice(url, env, origin) {
-  const ids  = (url.searchParams.get("ids") || "bitcoin,ethereum").toLowerCase();
-  const vs   = (url.searchParams.get("vs")  || "usd").toLowerCase();
-  const chg  = (url.searchParams.get("change") || "true").toLowerCase();
+  // expects: /market/price?ids=bitcoin,ethereum&vs=usd
+  const ids = (url.searchParams.get("ids") || "").trim();
+  const vs  = (url.searchParams.get("vs")  || "usd").trim();
 
-  const cgUrl = `https://api.coingecko.com/api/v3/simple/price` +
-                `?ids=${encodeURIComponent(ids)}` +
-                `&vs_currencies=${encodeURIComponent(vs)}` +
-                `&include_24hr_change=${encodeURIComponent(chg)}`;
+  if (!ids) return json({ error: "ids required" }, 400, origin);
+
+  const cgUrl = `https://api.coingecko.com/api/v3/simple/price?ids=${encodeURIComponent(ids)}&vs_currencies=${encodeURIComponent(vs)}&include_24hr_change=true`;
 
   const headers = {};
   if (env.COINGECKO_API_KEY) headers["x-cg-pro-api-key"] = env.COINGECKO_API_KEY;
@@ -141,14 +134,10 @@ async function handlePrice(url, env, origin) {
   try {
     const res = await fetch(cgUrl, {
       headers,
+      // cache for 60s to avoid 429s
       cf: { cacheTtl: 60, cacheEverything: true },
     });
-    if (!res.ok) {
-      return new Response(JSON.stringify({ error: "coingecko_failed", status: res.status }), {
-        status: res.status,
-        headers: { "content-type": "application/json", ...corsHeaders(origin) },
-      });
-    }
+    if (!res.ok) return json({ error: "coingecko_failed", status: res.status }, res.status, origin);
     const data = await res.json();
     return new Response(JSON.stringify(data), {
       status: 200,
@@ -159,6 +148,6 @@ async function handlePrice(url, env, origin) {
       },
     });
   } catch (e) {
-    return json({ error: "market_fetch_failed", message: e.message }, 500, origin);
+    return json({ error: "price_fetch_failed", message: e.message }, 500, origin);
   }
 }
