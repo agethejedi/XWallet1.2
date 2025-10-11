@@ -2,6 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
+  <meta http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' https://cdn.jsdelivr.net https://esm.sh https://*.workers.dev 'unsafe-eval';
+        connect-src 'self' https://*.workers.dev https://api.coingecko.com;
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: https:;
+        font-src 'self' https:;
+        base-uri 'self';
+        frame-ancestors 'none';
+      ">
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>X‑Wallet by RiskXLabs — Web v1.2</title>
 <link rel="stylesheet" href="css/styles.css"/>
